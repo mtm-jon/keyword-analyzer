@@ -1,21 +1,23 @@
 import streamlit as st
 import numpy as np
-from openai import OpenAI
 import pandas as pd
 import plotly.express as px
 from collections import Counter
 import re
+from vertexai.language_models import TextEmbeddingModel
+import google.cloud.aiplatform as vertex_ai
 
-# Initialize OpenAI client
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# Initialize Vertex AI
+vertex_ai.init(
+    project=st.secrets["GOOGLE_CLOUD_PROJECT"],
+    location=st.secrets["GOOGLE_CLOUD_LOCATION"]
+)
 
 def get_embedding(text):
-    """Get embedding from OpenAI API"""
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text
-    )
-    return response.data[0].embedding
+    """Get embedding from Google's PaLM API"""
+    model = TextEmbeddingModel.from_pretrained("textembedding-gecko@latest")
+    embeddings = model.get_embeddings([text])
+    return embeddings[0].values
 
 def cosine_similarity(vec_a, vec_b):
     """Calculate cosine similarity between two vectors"""
