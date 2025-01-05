@@ -1,8 +1,6 @@
 streamlit
-openai
 numpy
 pandas
 plotly
 google-cloud-aiplatform
 scikit-learn
-nltk
