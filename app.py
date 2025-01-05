@@ -7,8 +7,7 @@ import google.cloud.aiplatform as vertex_ai
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
-import nltk
-from nltk.tokenize import sent_tokenize
+import re
 import re
 
 # Initialize Vertex AI
@@ -25,7 +24,7 @@ def get_embedding(text):
 
 def chunk_content(text, chunk_size=3):
     """Split content into overlapping chunks"""
-    sentences = sent_tokenize(text)
+    sentences = simple_sentence_tokenize(text)
     chunks = []
     for i in range(0, len(sentences) - chunk_size + 1):
         chunk = ' '.join(sentences[i:i + chunk_size])
@@ -81,6 +80,15 @@ def analyze_content_diversity(chunk_embeddings, n_clusters=3):
         })
     
     return cluster_analysis
+
+def simple_sentence_tokenize(text):
+    """Simple but robust sentence tokenization"""
+    # Handle multiple punctuation marks
+    sentence_endings = r'[.!?]+'
+    # Split on sentence endings followed by space or newline
+    sentences = re.split(f'{sentence_endings}[\s\n]+', text)
+    # Clean up and filter empty sentences
+    return [s.strip() + '.' for s in sentences if s.strip()]
 
 def analyze_serp_features(content):
     """Analyze content for potential SERP feature opportunities"""
@@ -155,7 +163,7 @@ def analyze_serp_features(content):
     
     # Check for featured snippet potential
     # Prioritize definitions, short explanations, and clear answers
-    sentences = [s.strip() for s in content.split('.') if len(s.strip()) > 20 and len(s.strip()) < 300]
+    sentences = [s for s in simple_sentence_tokenize(content) if len(s.strip()) > 20 and len(s.strip()) < 300]
     definition_starters = ['is a', 'refers to', 'means', 'defines', 'consists of']
     for sentence in sentences:
         if any(marker in sentence.lower() for marker in definition_starters):
