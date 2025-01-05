@@ -2,25 +2,20 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.express as px
-from vertexai.language_models import TextEmbeddingModel
-import google.cloud.aiplatform as vertex_ai
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
-import re
+import requests
 import re
 
-# Initialize Vertex AI
-vertex_ai.init(
-    project=st.secrets["GOOGLE_CLOUD_PROJECT"],
-    location=st.secrets["GOOGLE_CLOUD_LOCATION"]
-)
+# Configuration
+EMBEDDING_SERVER_URL = "http://localhost:5001/embed"
 
 def get_embedding(text):
-    """Get embedding from local Vertex AI server"""
+    """Get embedding from local server"""
     try:
         response = requests.post(
-            "http://localhost:5001/embed",
+            EMBEDDING_SERVER_URL,
             json={
                 "text": text,
                 "task": "RETRIEVAL_DOCUMENT"
@@ -34,6 +29,8 @@ def get_embedding(text):
     except Exception as e:
         st.error(f"Error connecting to embedding server: {str(e)}")
         return None
+
+[... rest of your existing app code ...]
 
 def chunk_content(text, chunk_size=3):
     """Split content into overlapping chunks"""
