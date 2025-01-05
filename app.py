@@ -17,10 +17,23 @@ vertex_ai.init(
 )
 
 def get_embedding(text):
-    """Get embedding from Google's PaLM API"""
-    model = TextEmbeddingModel.from_pretrained("textembedding-gecko@latest")
-    embeddings = model.get_embeddings([text])
-    return embeddings[0].values
+    """Get embedding from local Vertex AI server"""
+    try:
+        response = requests.post(
+            "http://localhost:5001/embed",
+            json={
+                "text": text,
+                "task": "RETRIEVAL_DOCUMENT"
+            }
+        )
+        if response.status_code == 200:
+            return response.json()["embedding"]
+        else:
+            st.error(f"Error from embedding server: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error connecting to embedding server: {str(e)}")
+        return None
 
 def chunk_content(text, chunk_size=3):
     """Split content into overlapping chunks"""
