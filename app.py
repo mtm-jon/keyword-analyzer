@@ -229,19 +229,78 @@ def main():
             progress_bar.progress(33)
             
             with tab2:
-                # ... (Content Structure Analysis) 
+                st.subheader("Content Structure Analysis")
+                chunks = chunk_text(main_content)
+                chunk_similarities = calculate_chunk_similarity(chunks)
+                
+                if not chunk_similarities.empty:
+                    fig_chunks = px.line(
+                        chunk_similarities,
+                        x='Chunk Pair',
+                        y='Similarity',
+                        title='Content Flow Analysis'
+                    )
+                    st.plotly_chart(fig_chunks, use_container_width=True)
+                
+                # Basic metrics
+                words = main_content.split()
+                paragraphs = main_content.split('\n\n')
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Words", len(words))
+                col2.metric("Total Paragraphs", len(paragraphs))
+                col3.metric("Avg Words per Paragraph", round(len(words)/len(paragraphs) if paragraphs else 0))
             
             progress_bar.progress(66)
-            
+
             with tab3:
-                # ... (Topic Analysis)
+                st.subheader("Topic Analysis")
+                diversity_metrics = analyze_topic_diversity(chunks)
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Topic Consistency", f"{diversity_metrics['average_similarity']:.2%}")
+                col2.metric("Topic Variance", f"{diversity_metrics['similarity_std']:.2%}")
+                col3.metric("Topic Diversity", f"{diversity_metrics['diversity_score']:.2%}")
+                
+                # Recommendations based on analysis
+                st.subheader("Content Recommendations")
+                recommendations = []
+                
+                # Keyword recommendations
+                if not keyword_relevance.empty:
+                    best_keyword = keyword_relevance.iloc[0]
+                    if best_keyword["Similarity Score (%)"] > 80:
+                        recommendations.append(f"✅ Strong alignment with keyword: '{best_keyword['Keyword']}'")
+                    elif best_keyword["Similarity Score (%)"] > 60:
+                        recommendations.append(f"📈 Moderate alignment with keyword: '{best_keyword['Keyword']}'. Consider strengthening the focus.")
+                    else:
+                        recommendations.append(f"⚠️ Low alignment with all keywords. Consider revising content to better target your keywords.")
+                
+                # Topic diversity recommendations
+                if diversity_metrics['diversity_score'] < 0.3:
+                    recommendations.append("📝 Content might be too focused - consider expanding topic coverage")
+                elif diversity_metrics['diversity_score'] > 0.7:
+                    recommendations.append("🎯 Content might be too diverse - consider tightening topic focus")
+                
+                # Content structure recommendations
+                if any(sim < 0.5 for sim in chunk_similarities['Similarity']):
+                    recommendations.append("⚠️ Some content sections have low topical connection - consider improving content flow")
+                
+                for rec in recommendations:
+                    st.write(rec)
             
             progress_bar.progress(100)
             
-            # ... (Export options)
+            # Export options
+            st.sidebar.subheader("Export Results")
+            if not keyword_relevance.empty:
+                csv = keyword_relevance.to_csv(index=False)
+                st.sidebar.download_button(
+                    label="Download Analysis as CSV",
+                    data=csv,
+                    file_name="seo_analysis_results.csv",
+                    mime="text/csv"
+                )
         
         except Exception as e:
             st.error(f"An error occurred during analysis: {str(e)}")
-
-if __name__ == "__main__":
-    main()
