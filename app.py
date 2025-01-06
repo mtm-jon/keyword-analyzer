@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import requests
 from sklearn.metrics.pairwise import cosine_similarity
-from collections import defaultdict
 import plotly.express as px
 import plotly.graph_objects as go
 from typing import List, Dict, Any
@@ -58,6 +57,39 @@ def chunk_text(text: str, chunk_size: int = 200) -> List[str]:
     
     return chunks
 
+def analyze_keyword_relevance(content: str, keywords: List[str]) -> pd.DataFrame:
+    """Analyze content relevance to multiple keywords"""
+    content_embedding = get_embedding(content)
+    if not content_embedding:
+        return pd.DataFrame()
+    
+    results = []
+    for keyword in keywords:
+        keyword_embedding = get_embedding(keyword)
+        if keyword_embedding:
+            similarity = cosine_similarity([content_embedding], [keyword_embedding])[0][0]
+            results.append({
+                "Keyword": keyword,
+                "Similarity Score (%)": round(similarity * 100, 2)
+            })
+    
+    return pd.DataFrame(results).sort_values("Similarity Score (%)", ascending=False)
+
+def analyze_chunk_keyword_relevance(chunks: List[str], keywords: List[str]) -> Dict[str, List[float]]:
+    """Analyze each chunk's relevance to keywords"""
+    chunk_keyword_scores = {keyword: [] for keyword in keywords}
+    
+    for chunk in chunks:
+        chunk_embedding = get_embedding(chunk)
+        if chunk_embedding:
+            for keyword in keywords:
+                keyword_embedding = get_embedding(keyword)
+                if keyword_embedding:
+                    similarity = cosine_similarity([chunk_embedding], [keyword_embedding])[0][0]
+                    chunk_keyword_scores[keyword].append(similarity * 100)
+    
+    return chunk_keyword_scores
+
 def calculate_chunk_similarity(chunks: List[str]) -> pd.DataFrame:
     """Calculate similarity between consecutive chunks"""
     chunk_embeddings = []
@@ -66,9 +98,10 @@ def calculate_chunk_similarity(chunks: List[str]) -> pd.DataFrame:
             embedding = st.session_state['embeddings_cache'][chunk]
         else:
             embedding = get_embedding(chunk)
-            if embedding:  # Only cache if we got a valid embedding
+            if embedding:
                 st.session_state['embeddings_cache'][chunk] = embedding
-        chunk_embeddings.append(embedding)
+        if embedding:
+            chunk_embeddings.append(embedding)
     
     similarities = []
     for i in range(len(chunk_embeddings)-1):
@@ -79,7 +112,7 @@ def calculate_chunk_similarity(chunks: List[str]) -> pd.DataFrame:
             )[0][0]
             similarities.append(similarity)
         else:
-            similarities.append(0.0)  # Fallback value if embedding failed
+            similarities.append(0.0)
     
     return pd.DataFrame({
         'Chunk Pair': [f"Chunks {i+1}-{i+2}" for i in range(len(similarities))],
@@ -106,10 +139,7 @@ def analyze_topic_diversity(chunks: List[str]) -> Dict[str, float]:
             'diversity_score': 0.0
         }
     
-    # Calculate pairwise similarities
     similarity_matrix = cosine_similarity(chunk_embeddings)
-    
-    # Calculate metrics
     avg_similarity = np.mean(similarity_matrix[np.triu_indices(len(similarity_matrix), k=1)])
     std_similarity = np.std(similarity_matrix[np.triu_indices(len(similarity_matrix), k=1)])
     
@@ -119,198 +149,119 @@ def analyze_topic_diversity(chunks: List[str]) -> Dict[str, float]:
         'diversity_score': 1 - avg_similarity
     }
 
-def identify_serp_features(text: str) -> Dict[str, bool]:
-    """Identify potential SERP feature opportunities"""
-    features = {
-        'featured_snippet': False,
-        'people_also_ask': False,
-        'list_format': False,
-        'table_format': False,
-        'how_to': False
-    }
-    
-    try:
-        # Check for list formats
-        if re.search(r'\n\s*[\-\*\d+]\s+', text):
-            features['list_format'] = True
-        
-        # Check for table-like content
-        if '|' in text or '\t' in text:
-            features['table_format'] = True
-        
-        # Check for how-to content
-        if re.search(r'how\s+to|steps?|guide', text.lower()):
-            features['how_to'] = True
-        
-        # Check for Q&A format (People Also Ask potential)
-        if re.search(r'\?.*\n', text):
-            features['people_also_ask'] = True
-        
-        # Check for featured snippet potential
-        if features['list_format'] or features['table_format'] or features['how_to']:
-            features['featured_snippet'] = True
-    except Exception as e:
-        st.error(f"Error analyzing SERP features: {str(e)}")
-    
-    return features
-
-def analyze_competitors(main_text: str, competitor_texts: List[str]) -> Dict[str, Any]:
-    """Analyze content gaps and similarities with competitors"""
-    try:
-        # Get embeddings
-        main_embedding = get_embedding(main_text)
-        if not main_embedding:
-            return {
-                'competitor_similarities': [],
-                'average_similarity': 0.0,
-                'content_gap_score': 0.0
-            }
-        
-        competitor_embeddings = []
-        for text in competitor_texts:
-            if text in st.session_state['embeddings_cache']:
-                embedding = st.session_state['embeddings_cache'][text]
-            else:
-                embedding = get_embedding(text)
-                if embedding:
-                    st.session_state['embeddings_cache'][text] = embedding
-            if embedding:
-                competitor_embeddings.append(embedding)
-        
-        if not competitor_embeddings:
-            return {
-                'competitor_similarities': [],
-                'average_similarity': 0.0,
-                'content_gap_score': 0.0
-            }
-        
-        # Calculate similarities
-        similarities = []
-        for comp_emb in competitor_embeddings:
-            similarity = cosine_similarity([main_embedding], [comp_emb])[0][0]
-            similarities.append(similarity)
-        
-        # Analyze content gaps
-        avg_competitor_embedding = np.mean(competitor_embeddings, axis=0)
-        gap_score = 1 - cosine_similarity([main_embedding], [avg_competitor_embedding])[0][0]
-        
-        return {
-            'competitor_similarities': similarities,
-            'average_similarity': np.mean(similarities),
-            'content_gap_score': gap_score
-        }
-    except Exception as e:
-        st.error(f"Error in competitor analysis: {str(e)}")
-        return {
-            'competitor_similarities': [],
-            'average_similarity': 0.0,
-            'content_gap_score': 0.0
-        }
-
-def detect_anomalies(similarities: List[float], threshold: float = 2) -> List[int]:
-    """Detect anomalies in content similarity scores"""
-    try:
-        if not similarities:
-            return []
-        z_scores = stats.zscore(similarities)
-        return [i for i, z in enumerate(z_scores) if abs(z) > threshold]
-    except Exception as e:
-        st.error(f"Error detecting anomalies: {str(e)}")
-        return []
-
 def main():
-    st.title("SEO Content Analyzer with Vector Embeddings")
+    st.title("🎯 SEO Content & Keyword Analyzer")
     
     # Input section
-    st.header("Content Input")
-    main_content = st.text_area("Enter your main content", height=200)
+    col1, col2 = st.columns([2, 1])
     
-    # Competitor analysis section
-    st.header("Competitor Analysis")
-    num_competitors = st.number_input("Number of competitor content to analyze", min_value=0, max_value=5, value=0)
-    competitor_contents = []
+    with col1:
+        main_content = st.text_area("Enter your content", height=200)
     
-    if num_competitors > 0:
-        for i in range(num_competitors):
-            competitor_content = st.text_area(f"Competitor Content {i+1}", height=150)
-            competitor_contents.append(competitor_content)
+    with col2:
+        keywords_input = st.text_area(
+            "Enter target keywords (one per line)",
+            height=200,
+            placeholder="keyword 1\nkeyword 2\nkeyword 3"
+        )
     
-    if st.button("Analyze Content"):
-        if main_content:
-            try:
-                # Progress bar
-                progress_bar = st.progress(0)
+    if st.button("Analyze Content", type="primary"):
+        if not main_content or not keywords_input:
+            st.error("Please provide both content and keywords")
+            return
+        
+        keywords = [k.strip() for k in keywords_input.split('\n') if k.strip()]
+        
+        try:
+            # Progress bar
+            progress_bar = st.progress(0)
+            
+            # Create tabs for different analyses
+            tab1, tab2, tab3 = st.tabs(["Keyword Analysis", "Content Structure", "Topic Analysis"])
+            
+            with tab1:
+                # Overall keyword relevance
+                st.subheader("Overall Keyword Relevance")
+                keyword_relevance = analyze_keyword_relevance(main_content, keywords)
                 
-                # 1. Chunk Analysis
+                if not keyword_relevance.empty:
+                    fig = px.bar(
+                        keyword_relevance,
+                        x="Keyword",
+                        y="Similarity Score (%)",
+                        title="Keyword Semantic Alignment",
+                        color="Similarity Score (%)",
+                        color_continuous_scale="viridis"
+                    )
+                    fig.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Chunk-level keyword analysis
+                st.subheader("Content Section Keyword Relevance")
+                chunks = chunk_text(main_content)
+                chunk_keyword_scores = analyze_chunk_keyword_relevance(chunks, keywords)
+                
+                # Plot chunk-keyword heatmap
+                if chunk_keyword_scores and any(scores for scores in chunk_keyword_scores.values()):
+                    fig_heatmap = go.Figure(data=go.Heatmap(
+                        z=list(chunk_keyword_scores.values()),
+                        x=[f"Chunk {i+1}" for i in range(len(next(iter(chunk_keyword_scores.values()))))],
+                        y=list(chunk_keyword_scores.keys()),
+                        colorscale="Viridis",
+                        colorbar=dict(title="Relevance Score (%)")
+                    ))
+                    fig_heatmap.update_layout(title="Keyword Relevance by Content Section")
+                    st.plotly_chart(fig_heatmap, use_container_width=True)
+            
+            progress_bar.progress(33)
+            
+            with tab2:
                 st.subheader("Content Structure Analysis")
                 chunks = chunk_text(main_content)
                 chunk_similarities = calculate_chunk_similarity(chunks)
                 
-                # Plot chunk similarities
                 if not chunk_similarities.empty:
-                    fig_chunks = px.line(chunk_similarities, x='Chunk Pair', y='Similarity',
-                                       title='Content Flow Analysis')
-                    st.plotly_chart(fig_chunks)
+                    fig_chunks = px.line(
+                        chunk_similarities,
+                        x='Chunk Pair',
+                        y='Similarity',
+                        title='Content Flow Analysis'
+                    )
+                    st.plotly_chart(fig_chunks, use_container_width=True)
                 
-                progress_bar.progress(20)
+                # Basic metrics
+                words = main_content.split()
+                paragraphs = main_content.split('\n\n')
                 
-                # 2. Topic Diversity Analysis
-                st.subheader("Topic Diversity Analysis")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Words", len(words))
+                col2.metric("Total Paragraphs", len(paragraphs))
+                col3.metric("Avg Words per Paragraph", round(len(words)/len(paragraphs) if paragraphs else 0))
+            
+            progress_bar.progress(66)
+            
+            with tab3:
+                st.subheader("Topic Analysis")
                 diversity_metrics = analyze_topic_diversity(chunks)
                 
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Average Topic Similarity", f"{diversity_metrics['average_similarity']:.2f}")
-                col2.metric("Topic Variance", f"{diversity_metrics['similarity_std']:.2f}")
-                col3.metric("Diversity Score", f"{diversity_metrics['diversity_score']:.2f}")
+                col1.metric("Topic Consistency", f"{diversity_metrics['average_similarity']:.2%}")
+                col2.metric("Topic Variance", f"{diversity_metrics['similarity_std']:.2%}")
+                col3.metric("Topic Diversity", f"{diversity_metrics['diversity_score']:.2%}")
                 
-                progress_bar.progress(40)
-                
-                # 3. SERP Features Analysis
-                st.subheader("SERP Feature Opportunities")
-                serp_features = identify_serp_features(main_content)
-                
-                for feature, present in serp_features.items():
-                    st.checkbox(
-                        feature.replace('_', ' ').title(),
-                        value=present,
-                        disabled=True
-                    )
-                
-                progress_bar.progress(60)
-                
-                # 4. Competitor Analysis
-                if competitor_contents and all(competitor_contents):
-                    st.subheader("Competitor Analysis")
-                    competitor_analysis = analyze_competitors(main_content, competitor_contents)
-                    
-                    if competitor_analysis['competitor_similarities']:
-                        # Plot competitor similarities
-                        fig_competitors = go.Figure()
-                        fig_competitors.add_trace(go.Bar(
-                            x=[f"Competitor {i+1}" for i in range(len(competitor_analysis['competitor_similarities']))],
-                            y=competitor_analysis['competitor_similarities'],
-                            name="Similarity Score"
-                        ))
-                        fig_competitors.update_layout(title="Content Similarity with Competitors")
-                        st.plotly_chart(fig_competitors)
-                        
-                        st.metric("Content Gap Score", f"{competitor_analysis['content_gap_score']:.2f}")
-                        
-                        # Detect anomalies
-                        anomalies = detect_anomalies(competitor_analysis['competitor_similarities'])
-                        if anomalies:
-                            st.warning("Potential content gaps detected with competitors: " + 
-                                     ", ".join([f"Competitor {i+1}" for i in anomalies]))
-                
-                progress_bar.progress(80)
-                
-                # 5. Recommendations
-                st.subheader("SEO Recommendations")
+                # Recommendations based on analysis
+                st.subheader("Content Recommendations")
                 recommendations = []
                 
-                # Content structure recommendations
-                if not chunk_similarities.empty and any(sim < 0.5 for sim in chunk_similarities['Similarity']):
-                    recommendations.append("⚠️ Consider improving content flow between chunks with low similarity scores")
+                # Keyword recommendations
+                if not keyword_relevance.empty:
+                    best_keyword = keyword_relevance.iloc[0]
+                    if best_keyword["Similarity Score (%)"] > 80:
+                        recommendations.append(f"✅ Strong alignment with keyword: '{best_keyword['Keyword']}'")
+                    elif best_keyword["Similarity Score (%)"] > 60:
+                        recommendations.append(f"📈 Moderate alignment with keyword: '{best_keyword['Keyword']}'. Consider strengthening the focus.")
+                    else:
+                        recommendations.append(f"⚠️ Low alignment with all keywords. Consider revising content to better target your keywords.")
                 
                 # Topic diversity recommendations
                 if diversity_metrics['diversity_score'] < 0.3:
@@ -318,25 +269,28 @@ def main():
                 elif diversity_metrics['diversity_score'] > 0.7:
                     recommendations.append("🎯 Content might be too diverse - consider tightening topic focus")
                 
-                # SERP feature recommendations
-                for feature, present in serp_features.items():
-                    if not present:
-                        recommendations.append(f"💡 Consider adding {feature.replace('_', ' ')} content for SERP features")
-                
-                # Competitor-based recommendations
-                if 'competitor_analysis' in locals():
-                    if competitor_analysis['content_gap_score'] > 0.3:
-                        recommendations.append("🔍 Significant content gaps detected - review competitor topics")
+                # Content structure recommendations
+                if any(sim < 0.5 for sim in chunk_similarities['Similarity']):
+                    recommendations.append("⚠️ Some content sections have low topical connection - consider improving content flow")
                 
                 for rec in recommendations:
                     st.write(rec)
-                
-                progress_bar.progress(100)
-                
-            except Exception as e:
-                st.error(f"An error occurred during analysis: {str(e)}")
-        else:
-            st.error("Please enter some content to analyze")
+            
+            progress_bar.progress(100)
+            
+            # Export options
+            st.sidebar.subheader("Export Results")
+            if not keyword_relevance.empty:
+                csv = keyword_relevance.to_csv(index=False)
+                st.sidebar.download_button(
+                    label="Download Analysis as CSV",
+                    data=csv,
+                    file_name="seo_analysis_results.csv",
+                    mime="text/csv"
+                )
+        
+        except Exception as e:
+            st.error(f"An error occurred during analysis: {str(e)}")
 
 if __name__ == "__main__":
     main()
