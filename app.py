@@ -294,3 +294,25 @@ def main():
 
 if __name__ == "__main__":
     main()
+with tab1:
+    # ... (Overall keyword relevance)
+
+    # Chunk-level keyword analysis
+    st.subheader("Content Section Keyword Relevance")
+    chunks = chunk_text(main_content)
+    chunk_keyword_scores = analyze_chunk_keyword_relevance(chunks, keywords)
+
+    # ... (Plot chunk-keyword heatmap)
+
+    # Display chunks with keyword highlighting
+    st.subheader("Chunks with Keyword Highlights")
+    for i, chunk in enumerate(chunks):
+        st.write(f"**Chunk {i+1}:**")
+        highlighted_chunk = highlight_keywords(chunk, keywords) # Function to highlight keywords
+        st.write(highlighted_chunk, unsafe_allow_html=True) # If using HTML for highlighting
+
+def highlight_keywords(chunk, keywords):
+    """Highlights keywords in a chunk of text."""
+    for keyword in keywords:
+        chunk = chunk.replace(keyword, f"<mark style='background-color:lightgreen'>{keyword}</mark>")
+    return chunk 
